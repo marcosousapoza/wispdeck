@@ -103,6 +103,51 @@ docker run --rm --name wispdeck -p 127.0.0.1:8080:8080 \
 
 The image sets the runtime-only `WISPDECK_LISTEN=0.0.0.0:8080` override so its loopback-mapped port is reachable. Outside the image, the safe persisted default remains `127.0.0.1:8080`. The bootstrap variable can be removed after credentials exist. `GET /healthz` returns `204` and requires no authentication.
 
+### Rootless Podman Quadlet
+
+The files under `deploy/quadlet/` run Wispdeck as a rootless systemd user service. They create a persistent named volume, publish Wispdeck only on `127.0.0.1:8080`, inject the bootstrap password from a Podman secret, and opt into registry auto-updates.
+
+Create the bootstrap secret without placing the password in the Quadlet or shell history:
+
+```sh
+read -rsp 'Initial administrator password: ' WISP_ADMIN_PASSWORD
+printf '%s' "$WISP_ADMIN_PASSWORD" | podman secret create wispdeck-admin-password -
+unset WISP_ADMIN_PASSWORD
+```
+
+Install and start the rootless Quadlets from a repository checkout:
+
+```sh
+install -d -m 0700 ~/.config/containers/systemd
+install -m 0644 deploy/quadlet/wispdeck.container ~/.config/containers/systemd/
+install -m 0644 deploy/quadlet/wispdeck-data.volume ~/.config/containers/systemd/
+systemctl --user daemon-reload
+systemctl --user start wispdeck.service
+```
+
+The `[Install]` section makes the generated service part of `default.target`; do not run `systemctl --user enable wispdeck.service` because generated Quadlet services are transient. To start the user service after boot without an interactive login, enable lingering once:
+
+```sh
+loginctl enable-linger "$USER"
+```
+
+Inspect the service and its logs with:
+
+```sh
+systemctl --user status wispdeck.service
+journalctl --user -u wispdeck.service -f
+```
+
+Enable Podman's user auto-update timer if automatic `latest` updates are desired:
+
+```sh
+systemctl --user enable --now podman-auto-update.timer
+```
+
+The Podman secret remains attached on later starts, but Wispdeck ignores `WISP_ADMIN_PASSWORD` after `/data/admin-credentials.toml` exists. Changing or recreating that secret cannot reset an existing administrator password. Use the documented `reset-admin-password` recovery command instead.
+
+For Caddy running on the host, keep `reverse_proxy 127.0.0.1:8080`. For another host port, change `PublishPort` in `wispdeck.container`, run `systemctl --user daemon-reload`, and restart `wispdeck.service`.
+
 ## Caddy
 
 Caddy is optional, but a production deployment needs Caddy or another HTTPS/WSS-capable reverse proxy unless TLS is terminated elsewhere. Wispdeck itself serves HTTP and WebSocket traffic without TLS. Keep port 8080 bound to loopback or a private container network. Caddy forwards both paths without stripping `/wisp/`:

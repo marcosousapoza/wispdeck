@@ -1,0 +1,5 @@
+[Unit]
+Description=Wispdeck persistent data volume
+
+[Volume]
+VolumeName=wispdeck-data

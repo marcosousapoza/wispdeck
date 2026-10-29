@@ -1,0 +1,22 @@
+[Unit]
+Description=Wispdeck Wisp proxy and administration interface
+
+[Container]
+Image=ghcr.io/marcosousapoza/wispdeck:latest
+Pull=newer
+AutoUpdate=registry
+Volume=wispdeck-data.volume:/data
+PublishPort=127.0.0.1:8080:8080
+Secret=wispdeck-admin-password,type=env,target=WISP_ADMIN_PASSWORD
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=all
+LogDriver=journald
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=900
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target
