@@ -1,0 +1,27 @@
+# Wispdeck safe defaults. No credentials belong in this file.
+listen = "127.0.0.1:8080"
+log_level = "info"
+
+[admin]
+secure_cookie = true
+session_minutes = 30
+
+[policy]
+allowed_ports = [465, 587, 993]
+allowed_hosts = []
+blocked_hosts = []
+allow_direct_ip = false
+allow_non_public_ips = false
+
+[limits]
+max_clients = 64
+streams_per_client = 16
+pending_dials = 64
+websocket_message_bytes = 65536
+stream_buffer_messages = 8
+max_total_buffered_bytes = 536870912
+
+[timeouts]
+dns_seconds = 5
+dial_seconds = 10
+idle_seconds = 300
