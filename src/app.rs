@@ -43,6 +43,7 @@ pub async fn serve(data_dir: PathBuf) -> Result<()> {
         data_dir,
         started: Instant::now(),
         config: tokio::sync::RwLock::new(config.clone()),
+        config_save: tokio::sync::Mutex::new(()),
         metrics: Arc::new(Metrics::default()),
         sessions: Arc::new(SessionRegistry::default()),
         admin_auth,

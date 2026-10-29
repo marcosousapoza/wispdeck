@@ -65,11 +65,12 @@ impl Default for Config {
 impl Default for AdminConfig {
     fn default() -> Self {
         Self {
-            secure_cookie: true,
+            secure_cookie: false,
             session_minutes: 30,
         }
     }
 }
+
 impl Default for PolicyConfig {
     fn default() -> Self {
         Self {
@@ -100,5 +101,15 @@ impl Default for TimeoutConfig {
             dial_seconds: 10,
             idle_seconds: 300,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+
+    #[test]
+    fn secure_cookie_starts_disabled_for_http_bootstrap() {
+        assert!(!Config::default().admin.secure_cookie);
     }
 }

@@ -44,6 +44,7 @@ pub struct ServerForm {
     pub csrf: String,
     pub listen: String,
     pub log_level: String,
+    pub secure_cookie: Option<String>,
     pub dns_seconds: u64,
     pub dial_seconds: u64,
     pub idle_seconds: u64,

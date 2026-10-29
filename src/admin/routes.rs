@@ -23,6 +23,7 @@ const COOKIE_NAME: &str = "wispdeck_admin";
 #[template(path = "login.html")]
 struct LoginTemplate {
     error: bool,
+    secure_cookie: bool,
 }
 
 #[derive(Template)]
@@ -36,6 +37,7 @@ struct DashboardTemplate {
     active_streams: usize,
     metrics: MetricsSnapshot,
     errors: Vec<String>,
+    secure_cookie: bool,
 }
 
 #[derive(Template)]
@@ -76,6 +78,7 @@ struct SettingsTemplate {
     dns_seconds: u64,
     dial_seconds: u64,
     idle_seconds: u64,
+    secure_cookie: bool,
     message: String,
 }
 
@@ -92,7 +95,10 @@ pub async fn login_page(State(state): State<Arc<AppState>>, headers: HeaderMap) 
     {
         return Redirect::to("/admin/").into_response();
     }
-    render(LoginTemplate { error: false })
+    render(LoginTemplate {
+        error: false,
+        secure_cookie: state.config.read().await.admin.secure_cookie,
+    })
 }
 
 pub async fn login(
@@ -106,23 +112,27 @@ pub async fn login(
         .await
     {
         Ok(Some((token, _))) => {
-            let secure = state.config.read().await.admin.secure_cookie;
+            let admin_config = state.config.read().await.admin.clone();
             let mut response = Redirect::to("/admin/").into_response();
-            let max_age = state.config.read().await.admin.session_minutes * 60;
-            let value = format!(
-                "{COOKIE_NAME}={token}; Path=/admin; HttpOnly; SameSite=Strict; Max-Age={max_age}{}",
-                if secure { "; Secure" } else { "" }
+            set_session_cookie(
+                &mut response,
+                &token,
+                admin_config.session_minutes * 60,
+                admin_config.secure_cookie,
             );
-            if let Ok(header) = HeaderValue::from_str(&value) {
-                response.headers_mut().insert(SET_COOKIE, header);
-            }
             response
         }
-        _ => (
-            StatusCode::UNAUTHORIZED,
-            render(LoginTemplate { error: true }),
-        )
-            .into_response(),
+        _ => {
+            let secure_cookie = state.config.read().await.admin.secure_cookie;
+            (
+                StatusCode::UNAUTHORIZED,
+                render(LoginTemplate {
+                    error: true,
+                    secure_cookie,
+                }),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -131,6 +141,7 @@ pub async fn dashboard(State(state): State<Arc<AppState>>, headers: HeaderMap) -
         return Redirect::to("/admin/login").into_response();
     };
     let sessions = state.sessions.list().await;
+    let secure_cookie = state.config.read().await.admin.secure_cookie;
     render(DashboardTemplate {
         uptime_seconds: state.started.elapsed().as_secs(),
         backend_name: state.backend.name,
@@ -140,6 +151,7 @@ pub async fn dashboard(State(state): State<Arc<AppState>>, headers: HeaderMap) -
         active_streams: sessions.iter().map(|item| item.streams).sum(),
         metrics: state.metrics.snapshot(),
         errors: state.recent_errors.read().await.iter().cloned().collect(),
+        secure_cookie,
     })
 }
 
@@ -261,6 +273,7 @@ pub async fn update_policy(
     let Some(session) = csrf_token(&state, &headers, &form.csrf).await else {
         return forbidden();
     };
+    let _save_guard = state.config_save.lock().await;
     let mut config = state.config.read().await.clone();
     let ports = form
         .allowed_ports
@@ -312,6 +325,7 @@ pub async fn settings(State(state): State<Arc<AppState>>, headers: HeaderMap) ->
         dns_seconds: config.timeouts.dns_seconds,
         dial_seconds: config.timeouts.dial_seconds,
         idle_seconds: config.timeouts.idle_seconds,
+        secure_cookie: config.admin.secure_cookie,
         message: String::new(),
     })
 }
@@ -324,31 +338,51 @@ pub async fn update_settings(
     let Some(session) = csrf_token(&state, &headers, &form.csrf).await else {
         return forbidden();
     };
+    let _save_guard = state.config_save.lock().await;
     let mut config = state.config.read().await.clone();
     config.listen = form.listen;
     config.log_level = form.log_level;
+    config.admin.secure_cookie = form.secure_cookie.is_some();
     config.timeouts.dns_seconds = form.dns_seconds;
     config.timeouts.dial_seconds = form.dial_seconds;
     config.timeouts.idle_seconds = form.idle_seconds;
-    let message = match validate(&config) {
-        Err(error) => error.to_string(),
+    let (message, saved) = match validate(&config) {
+        Err(error) => (error.to_string(), false),
         Ok(()) => match save_toml(&state.data_dir.join("config.toml"), &config, false).await {
-            Err(error) => error.to_string(),
+            Err(error) => (error.to_string(), false),
             Ok(()) => {
                 *state.config.write().await = config.clone();
-                "Saved. Timeout changes apply to new streams; listen address and log level require restart.".into()
+                (
+                    "Saved. Timeout and cookie changes apply immediately; listen address and log level require restart.".into(),
+                    true,
+                )
             }
         },
     };
-    render(SettingsTemplate {
+    let active_secure_cookie = if saved {
+        config.admin.secure_cookie
+    } else {
+        state.config.read().await.admin.secure_cookie
+    };
+    let mut response = render(SettingsTemplate {
         csrf: session.csrf,
-        listen: config.listen,
-        log_level: config.log_level,
+        listen: config.listen.clone(),
+        log_level: config.log_level.clone(),
         dns_seconds: config.timeouts.dns_seconds,
         dial_seconds: config.timeouts.dial_seconds,
         idle_seconds: config.timeouts.idle_seconds,
+        secure_cookie: active_secure_cookie,
         message,
-    })
+    });
+    if saved && let Some(token) = cookie(&headers) {
+        set_session_cookie(
+            &mut response,
+            &token,
+            config.admin.session_minutes * 60,
+            active_secure_cookie,
+        );
+    }
+    response
 }
 
 pub async fn admin_settings(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
@@ -374,7 +408,10 @@ pub async fn change_password(
         .change_password(&form.current_password, &form.new_password)
         .await
     {
-        Ok(true) => clear_cookie(Redirect::to("/admin/login").into_response()),
+        Ok(true) => {
+            let secure = state.config.read().await.admin.secure_cookie;
+            clear_cookie(Redirect::to("/admin/login").into_response(), secure)
+        }
         Ok(false) => render(AdminSettingsTemplate {
             csrf: session.csrf,
             error: "Current password is incorrect.".into(),
@@ -398,7 +435,8 @@ pub async fn logout(
         return forbidden();
     }
     state.admin_auth.logout(&token).await;
-    clear_cookie(Redirect::to("/admin/login").into_response())
+    let secure = state.config.read().await.admin.secure_cookie;
+    clear_cookie(Redirect::to("/admin/login").into_response(), secure)
 }
 
 async fn policy_response(state: &AppState, csrf: String, message: String) -> Response {
@@ -446,13 +484,23 @@ fn cookie(headers: &HeaderMap) -> Option<String> {
                 .map(str::to_owned)
         })
 }
-fn clear_cookie(mut response: Response) -> Response {
-    response.headers_mut().insert(
-        SET_COOKIE,
-        HeaderValue::from_static(
-            "wispdeck_admin=; Path=/admin; HttpOnly; SameSite=Strict; Max-Age=0; Secure",
-        ),
+fn set_session_cookie(response: &mut Response, token: &str, max_age: u64, secure: bool) {
+    let value = format!(
+        "{COOKIE_NAME}={token}; Path=/admin; HttpOnly; SameSite=Strict; Max-Age={max_age}{}",
+        if secure { "; Secure" } else { "" }
     );
+    if let Ok(header) = HeaderValue::from_str(&value) {
+        response.headers_mut().insert(SET_COOKIE, header);
+    }
+}
+fn clear_cookie(mut response: Response, secure: bool) -> Response {
+    let value = format!(
+        "{COOKIE_NAME}=; Path=/admin; HttpOnly; SameSite=Strict; Max-Age=0{}",
+        if secure { "; Secure" } else { "" }
+    );
+    if let Ok(header) = HeaderValue::from_str(&value) {
+        response.headers_mut().insert(SET_COOKIE, header);
+    }
     response
 }
 fn lines(value: &str) -> Vec<String> {
@@ -477,5 +525,35 @@ fn render(template: impl Template) -> Response {
             "template rendering failed",
         )
             .into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_cookie_security_follows_configuration() {
+        let mut response = StatusCode::OK.into_response();
+        set_session_cookie(&mut response, "token", 60, false);
+        let cookie = response.headers()[SET_COOKIE].to_str().unwrap();
+        assert!(cookie.contains("HttpOnly; SameSite=Strict"));
+        assert!(!cookie.contains("; Secure"));
+
+        set_session_cookie(&mut response, "token", 60, true);
+        let cookie = response.headers()[SET_COOKIE].to_str().unwrap();
+        assert!(cookie.ends_with("; Secure"));
+    }
+
+    #[test]
+    fn clearing_cookie_security_follows_configuration() {
+        let response = clear_cookie(StatusCode::OK.into_response(), false);
+        let cookie = response.headers()[SET_COOKIE].to_str().unwrap();
+        assert!(cookie.contains("Max-Age=0"));
+        assert!(!cookie.contains("; Secure"));
+
+        let response = clear_cookie(StatusCode::OK.into_response(), true);
+        let cookie = response.headers()[SET_COOKIE].to_str().unwrap();
+        assert!(cookie.ends_with("; Secure"));
     }
 }

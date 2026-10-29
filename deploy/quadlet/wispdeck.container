@@ -5,7 +5,7 @@ Description=Wispdeck Wisp proxy and administration interface
 Image=ghcr.io/marcosousapoza/wispdeck:latest
 Pull=newer
 AutoUpdate=registry
-Volume=wispdeck-data.volume:/data
+Volume=wispdeck-data.volume:/data:Z
 PublishPort=127.0.0.1:8080:8080
 Secret=wispdeck-admin-password,type=env,target=WISP_ADMIN_PASSWORD
 ReadOnly=true

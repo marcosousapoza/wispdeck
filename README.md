@@ -46,7 +46,7 @@ WISPDECK_DATA_DIR=./data WISP_ADMIN_PASSWORD='a long first-start password' cargo
 
 The default bind address is `127.0.0.1:8080`. Open `http://127.0.0.1:8080/admin/login`.
 
-A Secure cookie is a browser cookie carrying the `Secure` attribute. Browsers send it only over HTTPS, which prevents an administrator session token from being transmitted over unencrypted HTTP. Wispdeck's cookie is also `HttpOnly`, so browser JavaScript cannot read it, and `SameSite=Strict`, which limits cross-site requests. Because the default is `admin.secure_cookie = true`, plain-HTTP local login requires setting it to `false` in `data/config.toml`. Do that only for loopback development; production administration should use HTTPS.
+A Secure cookie is a browser cookie carrying the `Secure` attribute. Browsers send it only over HTTPS, which prevents an administrator session token from being transmitted over unencrypted HTTP. Wispdeck's cookie is also `HttpOnly`, so browser JavaScript cannot read it, and `SameSite=Strict`, which limits cross-site requests. `admin.secure_cookie` starts as `false` so the first administrator login works over loopback or a trusted private network without editing files in the data directory. The login page and Dashboard warn while it is disabled. Configure HTTPS, verify the HTTPS administration page works, then enable **Require HTTPS for administrator sessions** under **Server settings**. The change applies immediately.
 
 On the first start only, `WISP_ADMIN_PASSWORD` must be nonempty and at least 12 characters. Wispdeck writes only an Argon2id hash to `admin-credentials.toml`. Once that file exists it is authoritative: leaving or changing the environment variable cannot overwrite the password. Environment variables may be visible to operators who can inspect process or container configuration; this is the accepted bootstrap trade-off.
 
@@ -71,7 +71,7 @@ Credential files are atomically replaced with mode `0600`; ordinary configuratio
 
 Copy `config.example.toml` for all settings and defaults. The admin UI validates before atomically saving. Destination policy and timeouts apply to new streams. Bind address and log-level changes require restart. Client and semaphore capacity changes are persisted but require restart; the UI says so rather than claiming they are active. Disabling or removing a Wisp user revokes that user's active sessions. Tightening policy affects new streams; use Connections to terminate existing sessions.
 
-Admin sessions are in memory and intentionally disappear on restart. Cookies are HttpOnly, Secure by default, SameSite=Strict, and short-lived. State-changing forms require a per-session CSRF token. Login attempts are throttled after repeated failures.
+Admin sessions are in memory and intentionally disappear on restart. Cookies are HttpOnly, SameSite=Strict, and short-lived. The Secure attribute is enabled from **Server settings** after HTTPS is configured. State-changing forms require a per-session CSRF token. Login attempts are throttled after repeated failures.
 
 ## Logging
 
@@ -105,7 +105,7 @@ The image sets the runtime-only `WISPDECK_LISTEN=0.0.0.0:8080` override so its l
 
 ### Rootless Podman Quadlet
 
-The files under `deploy/quadlet/` run Wispdeck as a rootless systemd user service. They create a persistent named volume, publish Wispdeck only on `127.0.0.1:8080`, inject the bootstrap password from a Podman secret, and opt into registry auto-updates.
+The files under `deploy/quadlet/` run Wispdeck as a rootless systemd user service. They create a persistent SELinux-relabeled named volume, publish Wispdeck only on `127.0.0.1:8080`, inject the bootstrap password from a Podman secret, and opt into registry auto-updates.
 
 Create the bootstrap secret without placing the password in the Quadlet or shell history:
 
@@ -124,6 +124,8 @@ install -m 0644 deploy/quadlet/wispdeck-data.volume ~/.config/containers/systemd
 systemctl --user daemon-reload
 systemctl --user start wispdeck.service
 ```
+
+Do not pre-create `config.toml` with a helper container. On first start Wispdeck creates the configuration and credential files with the correct ownership and permissions inside the named volume. The initial HTTP login is intentionally available for setup, with prominent security warnings; configure HTTPS before creating Wisp users or carrying real traffic.
 
 The `[Install]` section makes the generated service part of `default.target`; do not run `systemctl --user enable wispdeck.service` because generated Quadlet services are transient. To start the user service after boot without an interactive login, enable lingering once:
 

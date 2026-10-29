@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, path::PathBuf, sync::Arc, time::Instant};
 
-use tokio::sync::{RwLock, Semaphore};
+use tokio::sync::{Mutex, RwLock, Semaphore};
 
 use crate::{
     auth::{admin::AdminAuth, wisp::WispUsers},
@@ -13,6 +13,7 @@ pub struct AppState {
     pub data_dir: PathBuf,
     pub started: Instant,
     pub config: RwLock<Config>,
+    pub config_save: Mutex<()>,
     pub metrics: Arc<Metrics>,
     pub sessions: Arc<SessionRegistry>,
     pub admin_auth: AdminAuth,

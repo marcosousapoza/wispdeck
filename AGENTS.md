@@ -57,7 +57,7 @@ mkdir -p ./data
 WISPDECK_DATA_DIR=./data WISP_ADMIN_PASSWORD='a strong development password' cargo run --locked -- serve
 ```
 
-The default listener is `127.0.0.1:8080`. Secure admin cookies are enabled by default and are not sent by browsers over plain HTTP. Set `admin.secure_cookie = false` only for loopback HTTP development; never make that the production default.
+The default listener is `127.0.0.1:8080`. Secure admin cookies start disabled so first-start administration works without manual data-directory edits. Keep the prominent UI warnings while disabled, require an explicit administrator action to enable the Secure attribute after HTTPS is configured, and never present plain HTTP as production-safe.
 
 ## Dependency rules
 
@@ -105,7 +105,7 @@ The default listener is `127.0.0.1:8080`. Secure admin cookies are enabled by de
 - Persist only Argon2id hashes and non-secret metadata for administrator credentials.
 - The normal server command must never perform an implicit password reset. Recovery belongs only to the interactive `reset-admin-password` CLI command.
 - Administrator password changes require the current password and invalidate all administrator sessions.
-- Keep administrator sessions short-lived and in memory. Preserve `HttpOnly`, `Secure` by default, and `SameSite=Strict` cookie behavior.
+- Keep administrator sessions short-lived and in memory. Preserve `HttpOnly` and `SameSite=Strict` cookie behavior. The Secure attribute must be immediately configurable from the authenticated administration UI and prominently warned about while disabled.
 - Check both authorization and CSRF tokens on every state-changing administration route, including logout and disconnect actions.
 - Preserve login throttling and constant-time CSRF comparisons.
 - Disabling, removing, or resetting a Wisp user must revoke that user's active sessions.
